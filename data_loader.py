@@ -135,13 +135,10 @@ class FingerData:
     def get_sizes(self):
         """
         Returns the size of the different data sets.
-        Args:
-            images: The images to have batched.
-            labels: The labels to have batched.
-            batchsize: How big the batch should be.
-
         Returns:
-            Iterable batch.
+            training_samples_n: Number of training samples.
+            validation_samples_n: Number of validation samples.
+            test_samples_n: Number of test samples.
         """
         training_samples_n = self._train_labels.shape[0]
         validation_samples_n = self._valid_labels.shape[0]
