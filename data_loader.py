@@ -33,7 +33,7 @@ class FingerData:
                 os.chdir('./' + str(number))
             except:
                 continue
-            contents = os.listdir()
+            contents = os.listdir(self._directory)
             if contents == []:  # if folder is empty
                 os.chdir('..')
                 continue
@@ -52,7 +52,7 @@ class FingerData:
                 os.chdir('./' + str(number))
             except:
                 raise FileNotFoundError("No data exists to load")
-            contents = os.listdir()
+            contents = os.listdir(self._directory)
             if contents == []:  # if folder is empty
                 print("No data for", str(number), '\nTraining highly not recommended!')
                 os.chdir('..')
@@ -70,10 +70,12 @@ class FingerData:
         Splits images and labels into training, validation, and test sets.
         """
         self._train_imgs, valtest, self._train_labels, valtest_labels = split_data(self._images, self._labels,
-                                                                                   shuffle=True, train_size=.6)
+                                                                                   shuffle=True, train_size=.6,
+                                                                                   test_size=.4)
         self._valid_imgs, self._test_imgs, self._valid_labels, self._test_labels = split_data(valtest, valtest_labels,
                                                                                               shuffle=True,
-                                                                                              train_size=.5)
+                                                                                              train_size=.5,
+                                                                                              test_size=.5)
 
     def get_training_batch(self, batchsize):
         """
