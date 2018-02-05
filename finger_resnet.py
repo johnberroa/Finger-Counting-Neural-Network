@@ -5,7 +5,7 @@ from data_loader import FingerData
 
 
 class ResNet:
-    def __init__(self, batchsize, epoch_num, dropout=.5, lr=.001):
+    def __init__(self, batchsize, epoch_num, dropout=.5, lr=.001, debug=False):
         """
         Defines the hyperparameters, creates the datasets, and Tensorflow placeholders
         """
@@ -13,8 +13,8 @@ class ResNet:
         self.batch_size = batchsize
         self.learning_rate = lr
         self.epochs = epoch_num
-        self.dropout_rate = dropout
-        self.is_training = False
+        # self.is_training = False
+        self.debug = debug
 
         # Batch normalization parameters
         self.norm_beta = 0.0
@@ -24,6 +24,7 @@ class ResNet:
         self.varis = []
 
         # Create the data class
+        if self.debug: print("Loading data...")
         self.data = FingerData()
 
         # Create data sets and a session that can be accessed throughout the class
@@ -35,9 +36,12 @@ class ResNet:
         # Defines placeholders and overall network variables
         self.images = tf.placeholder(tf.float32, [None, 300, 300, 3])
         self.labels = tf.placeholder(tf.float32, [None])
-        self.one_hot_labels = self.one_hot(self.labels)
-        self.is_training = tf.placeholder_with_default(True)
-        self.do_augment = tf.placeholder_with_default(True)
+        # self.is_training = tf.placeholder_with_default(1, [])
+        # self.do_augment = tf.placeholder_with_default(1, [])
+        # self.dropout_rate = tf.placeholder_with_default(dropout, [])
+        self.is_training = tf.placeholder(shape=[], dtype=tf.int16)
+        self.do_augment = tf.placeholder(shape=[], dtype=tf.int16)
+        self.dropout_rate = tf.placeholder(shape=[], dtype=tf.int16)
 
     def one_hot(self, lbls):
         """
@@ -88,15 +92,17 @@ class ResNet:
         Returns:
             Batch normalized images.
         """
-        if self.is_training:
+        if self.is_training == 1:
             mean, var = tf.nn.moments(inpt, [1, 2, 3], keep_dims=True)
             self.means.append(mean)
             self.varis.append(var)
-            return tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon)
+            return tf.cast(tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon), tf.float32)
         else:
+            print('shouldnt be here', self.is_training)
+            print(inpt.shape)
             mean = np.mean(self.means)
             var = np.mean(self.varis)
-            return tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon)
+            return tf.cast(tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon), tf.float32)
 
     def convolution_layer(self, inpt, filters, in_depth=3):
         """
@@ -191,7 +197,7 @@ class ResNet:
             Output of network in logits form.
         """
         # Alter brightness and contrast randomly
-        if self.do_augment:
+        if self.do_augment == 1:
             images = self.augment(self.images)
         else:
             images = self.images # for compatibility with the above code
@@ -214,6 +220,7 @@ class ResNet:
         """
         The backpropagation step with Adam optimizer.  Also computes metrics and creates summary statistics.
         """
+        self.one_hot_labels = self.one_hot(self.labels)
         output = self.inference()
         self.loss = self.loss_function(output)
         tf.summary.scalar("Loss", self.loss)
@@ -235,6 +242,9 @@ class ResNet:
         Args:
             continue_training: Set to true to load previous weights and then train
         """
+        self.inference()
+        self.optimize()
+
         run = 'lr001' # name of the run, e.g. learning rate .001
         train_writer = tf.summary.FileWriter("./summaries/"+run+"train", tf.get_default_graph())
         validation_writer = tf.summary.FileWriter("./summaries/"+run+"validation", tf.get_default_graph())
@@ -251,7 +261,10 @@ class ResNet:
             for x, y in self.training:
                 summary, _acc, _loss, _ = self.session.run([self.merged_summaries, self.accuracy, self.loss,
                                                             self.minimize_loss], feed_dict={self.images: x,
-                                                                                            self.labels: y})
+                                                                                            self.labels: y,
+                                                                                            self.is_training: 1,
+                                                                                            self.dropout_rate: .5,
+                                                                                            self.do_augment: 1})
                 train_writer.add_summary(summary, step)
 
                 # Validate every 50 steps
@@ -259,8 +272,14 @@ class ResNet:
                     for v_x, v_y in self.validation:
                         # is_training is left on to allow us to use all available data to better find the real moments
                         summary, v_acc, _loss = self.session.run([self.merged_summaries, self.accuracy, self.loss],
-                                                                 feed_dict={self.images: v_x, self.labels: v_y})
+                                                                 feed_dict={self.images: v_x, self.labels: v_y,
+                                                                            self.is_training: 1, self.do_augment: 0,
+                                                                            self.dropout_rate: 1})
                         validation_writer.add_summary(summary, step)
+                        print("Current STEP:", step)
+                        print("Validation accuracy:", v_acc)
+                        print("Validation loss:", _loss)
+
 
                         if v_acc > prev_acc and step:
                             saver.save(self.session, "./checkpoints/fingers-{}.ckpt".format(v_acc, max_to_keep=10))
@@ -286,3 +305,6 @@ class ResNet:
         # saver = tf.train.import_meta_graph(checkpoints_file_name + '.meta')
         # saver.restore(sess, checkpoints_file_name)
 
+if __name__ == "__main__":
+    model = ResNet(2,2,debug=True)
+    model.train()
