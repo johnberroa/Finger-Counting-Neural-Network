@@ -1,4 +1,3 @@
-import numpy as np
 import cv2
 import os
 
@@ -31,7 +30,7 @@ def get_counts():
             os.chdir('./'+str(number))
         except:
             continue
-        contents = os.listdir()
+        contents = os.listdir('./')
         if contents == []: # if folder is empty
             print("No data for", str(number))
             os.chdir('..')
@@ -59,7 +58,7 @@ def order_file_structure():
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory)
-        contents = os.listdir()
+        contents = os.listdir('./')
         for image in contents:
             if image[:2] == directory+'-' and image[-3:] == 'jpg': # make sure it's an image and not a folder with proper label
                 os.rename("./"+image, "./"+directory+"./"+image) # move image to its respective folder
@@ -86,12 +85,13 @@ def capture_image_data(runs, counts=get_counts()):
     quit = False
     print("Press 'space' to capture image...")
     x0 = y0 = 100  # initial x and y rectangle crop offset
+    total = 0 # running total of images captured
     label = input("Enter initial label to begin collecting data...") or "UNLABELED"
+    print("Collecting data for label: {}".format(label))
     assert 0 <= int(label) <= 5, "INVALID LABEL (1-5, input{})".format(label)
     for run in range(runs):
         if quit:  # ends loop
             break
-        total = 1
         ret = cam = False
         capture = True
         try:
@@ -105,6 +105,7 @@ def capture_image_data(runs, counts=get_counts()):
                     held_frame = frame  # just in case frames continually are recorded while the user is typing
                     counts[label] += 1
                     cv2.imwrite(label + '-' + str(counts[label]) + '.jpg', crop_box(held_frame, x0, y0))
+                    total += 1
                     capture = False
                 elif key == ord("1"):
                     label = '1'
@@ -140,11 +141,57 @@ def capture_image_data(runs, counts=get_counts()):
             cam.release()
             cv2.destroyAllWindows()
             raise e
-        total += 1
     cam.release()
     cv2.destroyAllWindows()
     print("Data collection completed ({} images of {} recorded)".format(total, runs))
     print("Database:", counts)
+
+
+def renumber_images():
+    """
+    Renumbers the files in each finger number directory, in the event that some data was deleted and the numberings
+    are no longer correct.
+
+    It does this in two parts:
+    1: it goes through all files and renames them a dummy name (in this case, a sequential number).  This is to
+    avoid renaming something a name that already exists.
+    2: it goes through all files and properly renames them according to the proper x-y.jpg naming convention
+    """
+    order_file_structure() # to make sure everything is in the folder
+    directories = ['1', '2', '3', '4', '5']
+    # First erase names
+    for directory in directories:
+        try:  # try to find folder
+            os.chdir('./' + directory)
+        except:
+            print("Folder {} not found: is this a proper data folder? (RENAME OPERATION(1) FAILED)".format(directory))
+            break
+        contents = os.listdir('./')
+        if contents == []:  # if folder is empty
+            continue
+        starter = 0
+        for entry in contents:
+            os.rename(entry, str(starter))
+            starter += 1
+        os.chdir('..')
+    print("Successfully erased old image names...commencing renaming...")
+    # Second, rename
+    for directory in directories:
+        try:  # try to find folder
+            os.chdir('./' + directory)
+        except:
+            print("Folder {} not found: is this a proper data folder? (RENAME OPERATION(2) FAILED)".format(directory))
+            break
+        contents = os.listdir('./')
+        print("Renaming directory", directory+'...')
+        if contents == []:  # if folder is empty
+            continue
+        starter = 1
+        for entry in contents:
+            os.rename(entry, directory+'-'+str(starter)+'.jpg')
+            starter += 1
+        os.chdir('..')
+    print("Images successfully renumbered.")
 
 
 
@@ -152,3 +199,4 @@ if __name__ == "__main__":
     n = input("How many images would you like to collect?")
     capture_image_data(int(n))
     order_file_structure()
+    # renumber_images()
