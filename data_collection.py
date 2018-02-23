@@ -46,7 +46,8 @@ def get_counts():
                 continue
         counts[str(number)] = max(counter)
         os.chdir('..')
-    print("Current database:", counts)
+    print("Current database: ['1': {}, '2': {}, '3': {}, '4': {}, '5': {}]".format(counts['1'], counts['2'], counts['3'], counts['4'], counts['5']))
+    print("Total images:", sum(counts.values()))
     return counts
 
 
@@ -82,13 +83,17 @@ def capture_image_data(runs, counts=get_counts()):
             ret, frame = cam.read()
             return cam, ret, frame
 
+    if runs == 0:
+        print("No data to collect...quitting...")
+        return 0
     quit = False
     print("Press 'space' to capture image...")
+    print("Press 'q' to quit image capture...")
     x0 = y0 = 100  # initial x and y rectangle crop offset
     total = 0 # running total of images captured
     label = input("Enter initial label to begin collecting data...") or "UNLABELED"
     print("Collecting data for label: {}".format(label))
-    assert 0 <= int(label) <= 5, "INVALID LABEL (1-5, input{})".format(label)
+    assert 0 < int(label) <= 5, "INVALID LABEL (1-5, input={})".format(label)
     for run in range(runs):
         if quit:  # ends loop
             break
@@ -144,7 +149,8 @@ def capture_image_data(runs, counts=get_counts()):
     cam.release()
     cv2.destroyAllWindows()
     print("Data collection completed ({} images of {} recorded)".format(total, runs))
-    print("Database:", counts)
+    print("Current database: ['1': {}, '2': {}, '3': {}, '4': {}, '5': {}]".format(counts['1'], counts['2'], counts['3'], counts['4'], counts['5']))
+    print("Total images:", sum(counts.values()))
 
 
 def renumber_images():
@@ -196,7 +202,7 @@ def renumber_images():
 
 
 if __name__ == "__main__":
-    n = input("How many images would you like to collect?")
+    n = input("How many images would you like to collect? ")
     capture_image_data(int(n))
     order_file_structure()
     # renumber_images()

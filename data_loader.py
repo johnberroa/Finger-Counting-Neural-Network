@@ -1,6 +1,8 @@
 import os
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
+
 from sklearn.model_selection import train_test_split as split_data
 
 
@@ -58,7 +60,8 @@ class FingerData:
                 os.chdir('..')
                 continue
             for entry in contents:
-                img = plt.imread(entry)
+                img = cv2.imread(entry)
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 self._images[index] = img
                 self._labels[index] = int(entry[0])
                 index += 1
