@@ -88,9 +88,11 @@ def capture_image_data(runs, counts=get_counts()):
         return 0
     quit = False
     print("Press 'space' to capture image...")
+    print("Press 'h' for help...")
     print("Press 'q' to quit image capture...")
     x0 = y0 = 100  # initial x and y rectangle crop offset
     total = 0 # running total of images captured
+    start = True # to prevent switch warning at start
     label = input("Enter initial label to begin collecting data...") or "UNLABELED"
     print("Collecting data for label: {}".format(label))
     assert 0 < int(label) <= 5, "INVALID LABEL (1-5, input={})".format(label)
@@ -112,6 +114,7 @@ def capture_image_data(runs, counts=get_counts()):
                     cv2.imwrite(label + '-' + str(counts[label]) + '.jpg', crop_box(held_frame, x0, y0))
                     total += 1
                     capture = False
+                    start = False
                 elif key == ord("1"):
                     label = '1'
                     print("Collecting data for label: {}".format(label))
@@ -127,6 +130,13 @@ def capture_image_data(runs, counts=get_counts()):
                 elif key == ord("5"):
                     label = '5'
                     print("Collecting data for label: {}".format(label))
+                elif key == ord("h"):
+                    print("\nHELP:\nHold your hand within the red box, and show the number of the label with your fingers.")
+                    print("Try to vary your hand position within the frame.")
+                    print("When you want to take images of other numbers, press that number on your keyboard to change the label.")
+                    print("On the screen, the current label, total number of images, and also a helper display are shown.")
+                    print("The helper display shows how many images per label you should take, if you were to take an "
+                          "even amount of each based on the total.\n")
                 elif key == ord("q"):
                     print("Quitting data capture...")
                     cam.release()
@@ -139,6 +149,21 @@ def capture_image_data(runs, counts=get_counts()):
                     cv2.rectangle(frame, (x0, y0), (x0 + 300, y0 + 300), [0, 0, 255], 12)
                     cv2.putText(frame, "Collecting label: {}".format(label), (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 1.0,
                                 (0, 0, 255))
+                    cv2.putText(frame, "Number captured: {}".format(total), (15, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                                (0, 0, 255))
+                    if runs != 1:
+                        if not start:
+                            if (total+1)%(runs//5) == 0:
+                                cv2.putText(frame, "Per label: {}/{}-SWITCH AFTER".format(total%(runs//5)+1, runs//5),
+                                        (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0))
+                            else:
+                                cv2.putText(frame, "Per label: {}/{}".format(total%(runs//5)+1, runs//5),
+                                        (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255))
+                        else:
+                            cv2.putText(frame, "Per label: {}/{}".format(total%(runs//5)+1, runs//5),
+                                    (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255))
+                    else:
+                        cv2.putText(frame, "N/A", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255))
                     if ret == True:
                         cv2.imshow("Window", frame)
                     continue
@@ -202,6 +227,7 @@ def renumber_images():
 
 
 if __name__ == "__main__":
+    print("Welcome to 'FingerNet' data collection.  This script will collect images of hands holding up specific digits.")
     n = input("How many images would you like to collect? ")
     capture_image_data(int(n))
     order_file_structure()
