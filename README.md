@@ -13,6 +13,8 @@ A ResNet architecture neural network that counts the number of fingers held up i
 ### Data Collection
 ``data_collection.py`` will capture any number of images, label them, and create a file structure to store them.  You can take any number of images at any time, and change which label you want to put on the images on the fly.  Pressing ``q`` will quit if necessary.  After creating the images, the script will move each image into its respective folder (named after the images' label).
 
+The file structure used is five folders, each named after their respective label, placed in the root directory.  This structure was chosen because it allows easy access so check the data quickly during acquisition (i.e., no need to go click more than necessary).
+
 ### Data Loader
 ``data_loader.py`` will step through the folder structure and load each image into memory.  It will then split it into train (60%), validation (20%), and test (20%) datasets.  It also continues a method to create a generator object to step through training/validation/test batches.
 
