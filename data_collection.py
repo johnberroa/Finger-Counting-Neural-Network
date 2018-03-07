@@ -178,7 +178,8 @@ def capture_image_data(runs, counts=get_counts()):
     print("Data collection completed ({} images of {} recorded)".format(total, runs))
     print("Current database: ['1': {}, '2': {}, '3': {}, '4': {}, '5': {}]".format(counts['1'], counts['2'], counts['3'], counts['4'], counts['5']))
     print("Total images:", sum(counts.values()))
-    if sum(counts.values()) - checkpoint >= BACKUP_RATE:
+    order_file_structure()
+    if sum(counts.values())/5 - checkpoint >= BACKUP_RATE:
         print("A large amount of images were captured...creating backup...")
         backup.backup_data()
 
@@ -236,5 +237,4 @@ if __name__ == "__main__":
     print("Welcome to 'FingerNet' data collection.  This script will collect images of hands holding up specific digits.")
     n = input("How many images would you like to collect? ")
     capture_image_data(int(n))
-    order_file_structure()
     # renumber_images()
