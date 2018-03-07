@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+import time
 
 from data_loader import FingerData
 
@@ -9,6 +10,8 @@ class ResNet:
         """
         Defines the hyperparameters, creates the datasets, and Tensorflow placeholders
         """
+        self.start = time.time()
+
         tf.reset_default_graph()
         # Initialize the hyperparameters
         self.batch_size = batchsize
@@ -77,7 +80,7 @@ class ResNet:
             flat: Flattened tensor.
         """
         shape = inpt.get_shape().as_list()
-        flat = tf.reshape(inpt, [-1, shape[1] * shape[2] * shape[3]])
+        flat = tf.reshape(inpt, [-1, shape[1] * shape[2] * shape[3]], name='flatten')
         return flat
 
     def batch_normalize(self, inpt):
@@ -179,7 +182,7 @@ class ResNet:
         # Only dropout when training
         dropped = tf.cond(tf.equal(self.is_training, 1), 
             lambda: tf.nn.dropout(activation, self.dropout_rate), 
-            lambda: keep(activation))
+            lambda: keep(activation), name='dropout_cond')
         return dropped
 
     def output_layer(self, inpt):
@@ -278,7 +281,7 @@ class ResNet:
         step = 0
         prev_acc = 0
         print("Ready for training...")
-        '''
+        
         for e in range(self.epochs):
             print("Epoch:", e+1)
             for x, y in self.training:
@@ -314,8 +317,10 @@ class ResNet:
             self.training = self.data.get_training_batch(self.batch_size)
 
         saver.save(self.session, "./checkpoints/fingers-{:.2f}-end-step".format(v_acc), global_step=step)
+        end = time.time()
         print("Finished.")
-        '''
+        print('\nTotal time elapsed: {:.2f} minutes'.format(end - self.start))
+        
     def test(self):
         """
         Test on the test data.  Only use when training is complete.
@@ -330,5 +335,5 @@ class ResNet:
 
 
 if __name__ == "__main__":
-    model = ResNet(2,10,2,debug=True)
+    model = ResNet(2,50,2,debug=True)
     model.train()
