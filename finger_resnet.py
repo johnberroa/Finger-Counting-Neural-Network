@@ -14,18 +14,16 @@ class ResNet:
         self.batch_size = batchsize
         self.learning_rate = lr
         self.epochs = epoch_num
-        # self.is_training = False
         self.debug = debug
         self.do_augment = augment
         self.blocks = blocks
-        print("BLOCKS selectability not implemented")
 
         # Batch normalization parameters
         self.norm_beta = 0.0
         self.norm_gamma = 1.0
         self.norm_epsilon = 0.001
-        self.means = []
-        self.varis = []
+        self.means = tf.Variable(tf.zeros([1,1,1,4]), dtype=tf.float32, trainable=False, name='means')
+        self.varis = tf.Variable(tf.zeros([1,1,1,4]), dtype=tf.float32, trainable=False, name='variances')
 
         # Create the data class
         if self.debug: print("Loading data...")
@@ -41,9 +39,6 @@ class ResNet:
         self.images = tf.placeholder(tf.float32, [None, 300, 300, 3], name='images')
         self.labels = tf.placeholder(tf.int32, [None], name='labels')
         self.is_training = tf.placeholder_with_default(1, [], name='is_training')
-        # self.do_augment = tf.placeholder_with_default(1, [])
-        # self.dropout_rate = tf.placeholder_with_default(dropout, [])
-#         self.is_training = tf.placeholder(tf.int16, shape=[], name="is_training")
         self.dropout_rate = tf.placeholder(tf.float32, shape=[], name="dropout_rate")
 
     def one_hot(self, lbls):
@@ -67,9 +62,9 @@ class ResNet:
         Returns:
             flip: Augmented images to be passed on.
         """
-        bright = tf.map_fn(lambda img: tf.image.random_brightness(img, .25), inpt)
-        contrast = tf.map_fn(lambda img: tf.image.random_contrast(img, 0, .5), bright)
-        flip = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), contrast)
+        bright = tf.map_fn(lambda img: tf.image.random_brightness(img, .25), inpt, name='brightness')
+        contrast = tf.map_fn(lambda img: tf.image.random_contrast(img, 0, .5), bright, name='contrast')
+        flip = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), contrast, name='flip')
         return flip
 
     def flatten(self, inpt):
@@ -95,19 +90,19 @@ class ResNet:
         Returns:
             Batch normalized images.
         """
-#         def training(inpt):
-#             print("SHOULD BE HERE")
-#             mean, var = tf.nn.moments(inpt, [1, 2, 3], keep_dims=True)
-#             print(mean, var)
-#             self.means.append(mean)
-#             self.varis.append(var)
-#             return tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon)
-#         def not_training(inpt):
-#             mean = np.mean(self.means)
-#             var = np.mean(self.varis)
-#             return tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon)
-#         return tf.cond(self.is_training == 1, training(inpt), not_training(inpt))
-        return inpt
+        def training(inpt):
+            mean, var = tf.nn.moments(inpt, [1, 2, 3], keep_dims=True)
+            tf.assign(self.means, self.means + mean, name='update_mean')
+            tf.assign(self.varis, self.varis + var, name='update_varis')
+            return tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon, name='batchnorm')
+        def not_training(inpt):
+            mean = tf.reduce_mean(self.means, name='global_mean')
+            var = tf.reduce_mean(self.varis, name='global_var')
+            return tf.nn.batch_normalization(inpt, mean, var, self.norm_beta, self.norm_gamma, self.norm_epsilon, name='batchnorm_global')
+        return tf.cond(tf.equal(self.is_training, 1), lambda: training(inpt), lambda: not_training(inpt), name='batchnorm_cond')
+
+    def max_pool(self, inpt):
+        return tf.nn.max_pool(inpt, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = "SAME", name='maxpool')
 
     def convolution_layer(self, inpt, filters, in_depth=1):
         """
@@ -140,7 +135,7 @@ class ResNet:
         conv_bias = tf.get_variable("1x1_conv_biases", 1, initializer=tf.constant_initializer(0.0))
         return tf.nn.relu((tf.nn.conv2d(inpt, conv_weight, strides=[1, 1, 1, 1], padding="SAME") + conv_bias))
 
-    def convolution_block(self, inpt):
+    def convolution_block(self, inpt, name):
         """
         The ResNet part: creates two convolutional blocks and adds the input of the block to the output.
         If the channels of the input is larger than 1, it is "flattened" by doing a 1x1 convolution before adding it.
@@ -150,17 +145,19 @@ class ResNet:
         Returns:
             Convolved images.
         """
-        residual = self.batch_normalize(inpt)
         # Incoming input will always have multiple channels
-        with tf.variable_scope("residual_conv"):
+        with tf.variable_scope("residual_conv"+name):
             residual = self.convolution_layer_1x1(inpt)
-        with tf.variable_scope("conv1"):
-            first_layer = self.convolution_layer(residual, 16)
+            residual = self.batch_normalize(residual)
+        with tf.variable_scope("conv{}-1".format(name)):
+            first_layer = self.convolution_layer(inpt, 16, inpt.shape[3])
             first_layer = tf.nn.relu(first_layer)
             first_layer = self.batch_normalize(first_layer)
-        with tf.variable_scope("conv2"):
-            second_layer = self.convolution_layer(first_layer, 32, 16)
+        with tf.variable_scope("conv{}-2".format(name)):
+            second_layer = self.convolution_layer(first_layer, 8, 16)  # 32->8 due to OOM
+            second_layer = self.batch_normalize(second_layer)
         res_connect = tf.add(second_layer, residual)
+        if self.debug: print("CONV BLOCK CREATED")
         return tf.nn.relu(res_connect)
 
     def fully_connected(self, inpt, neurons):
@@ -173,13 +170,16 @@ class ResNet:
         Returns:
             Output of layer.
         """
+        def keep(a):  # Helper function to return activation for the tf.cond
+            return a
         fc_weight = tf.get_variable("fc_weights", [inpt.shape[1], neurons],
                                     initializer=tf.random_normal_initializer(stddev=0.001))
         fc_bias = tf.get_variable("fc_biases", [neurons], initializer=tf.constant_initializer(0.0))
         activation = tf.nn.relu((tf.matmul(inpt, fc_weight) + fc_bias))
-        dropped = tf.nn.dropout(activation, self.dropout_rate)
-#         # Only dropout when training
-#         dropped = tf.cond(self.is_training==1, tf.nn.dropout(activation, self.dropout_rate), lambda x: x, activation)
+        # Only dropout when training
+        dropped = tf.cond(tf.equal(self.is_training, 1), 
+            lambda: tf.nn.dropout(activation, self.dropout_rate), 
+            lambda: keep(activation))
         return dropped
 
     def output_layer(self, inpt):
@@ -209,12 +209,22 @@ class ResNet:
         else:
             images = self.images # for compatibility with the above code
 
-        with tf.variable_scope("conv_block1"):
-            conv_block1 = self.convolution_block(images)
-        with tf.variable_scope("conv_block2"):
-            conv_block2 = self.convolution_block(conv_block1)
+        # with tf.variable_scope("conv_block1"):
+        #     conv_block1 = self.convolution_block(images)
+        # with tf.variable_scope("conv_block2"):
+        #     conv_block2 = self.convolution_block(conv_block1)
+        # with tf.variable_scope("fc"):
+        #     flattened = self.flatten(conv_block2)
+        #     fc = self.fully_connected(flattened, 100)
+
+        with tf.variable_scope("conv"):
+            first_conv = self.convolution_layer(images, 32, 3)
+            throughput = self.max_pool(first_conv)
+        for i, block in enumerate(range(self.blocks)):
+            with tf.variable_scope("conv_block{}".format(i + 1)):
+                throughput = self.convolution_block(throughput, str(i))
         with tf.variable_scope("fc"):
-            flattened = self.flatten(conv_block2)
+            flattened = self.flatten(throughput)
             fc = self.fully_connected(flattened, 100)
         with tf.variable_scope("output"):
             output = self.output_layer(fc)
@@ -223,7 +233,7 @@ class ResNet:
     def loss_function(self, logits):
         return tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.one_hot_labels, logits=logits))
 
-    def optimize(self, output):
+    def backprop(self, output):
         """
         The backpropagation step with Adam optimizer.  Also computes metrics and creates summary statistics.
         """
@@ -238,7 +248,7 @@ class ResNet:
             correct_bools = tf.equal(tf.argmax(output, 1), tf.argmax(self.one_hot_labels, 1))
             # If so, it is a one, if not, it is a zero.  Take the average of those 1s and 0s to get the accuracy
             self.accuracy = tf.reduce_mean(tf.cast(correct_bools, tf.float32))
-            tf.summary.scalar("Accuracy", self.accuracy)
+        tf.summary.scalar("Accuracy", self.accuracy)
         self.merged_summaries = tf.summary.merge_all()
 
     def train(self, continue_training=False):
@@ -250,15 +260,15 @@ class ResNet:
         """
         print("Generating dataflow graph...")
         output = self.inference()
-        self.optimize(output)
+        self.backprop(output)
         print("Dataflow graph complete.")
 
-        run = 'lr'+str(self.learning_rate)[1:] # name of the run, e.g. learning rate .001 = lr001
+        run = 'lr'+str(self.learning_rate)[2:] # name of the run, e.g. learning rate .001 = lr001
         train_writer = tf.summary.FileWriter("./summaries/"+run+"train", tf.get_default_graph())
         validation_writer = tf.summary.FileWriter("./summaries/"+run+"validation", tf.get_default_graph())
         print("Data writers created.")
 
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(max_to_keep=5)
         if continue_training:
             print("Continuing training...")
             saver.restore(self.session, tf.train.latest_checkpoint('./checkpoints/train'))
@@ -268,7 +278,7 @@ class ResNet:
         step = 0
         prev_acc = 0
         print("Ready for training...")
-
+        '''
         for e in range(self.epochs):
             print("Epoch:", e+1)
             for x, y in self.training:
@@ -294,18 +304,18 @@ class ResNet:
 
 
                         if v_acc > prev_acc and step:
-                            saver.save(self.session, "./checkpoints/fingers-{}.ckpt".format(v_acc, max_to_keep=10))
+                            saver.save(self.session, "./checkpoints/fingers-{:.2f}-step".format(v_acc), global_step=step)
                         prev_acc = v_acc
 
                     # Refill the generator because it was exhausted
                     self.validation = self.data.get_validation_batch(-1)
-
+                step += 1
             # Refill the generator because it was exhausted
             self.training = self.data.get_training_batch(self.batch_size)
 
-        saver.save(self.session, "./checkpoints/fingers-{}-end.ckpt".format(v_acc), max_to_keep=20)
+        saver.save(self.session, "./checkpoints/fingers-{:.2f}-end-step".format(v_acc), global_step=step)
         print("Finished.")
-
+        '''
     def test(self):
         """
         Test on the test data.  Only use when training is complete.
@@ -320,5 +330,5 @@ class ResNet:
 
 
 if __name__ == "__main__":
-    model = ResNet(2,2,2,debug=True)
+    model = ResNet(2,10,2,debug=True)
     model.train()
