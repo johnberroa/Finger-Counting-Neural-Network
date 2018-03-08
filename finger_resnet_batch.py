@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 import time
 
-from data_loader import FingerData
+from data_loader import FingerDataBatch
 
 
 class ResNet:
@@ -30,13 +30,13 @@ class ResNet:
 
         # Create the data class
         if self.debug: print("Loading data...")
-        self.data = FingerData()
+        self.data = FingerDataBatch(self.batch_size)
 
         # Create data sets and a session that can be accessed throughout the class
         self.session = tf.Session()
-        self.training = self.data.get_training_batch(self.batch_size)
-        self.validation = self.data.get_validation_batch(-1)
-        self.test = self.data.get_test_batch(-1)
+        # self.training = self.data.get_training_batch(self.batch_size)
+        # self.validation = self.data.get_validation_batch(-1)
+        # self.test = self.data.get_test_batch(-1)
 
         # Defines placeholders and overall network variables
         self.images = tf.placeholder(tf.float32, [None, 300, 300, 3], name='images')
@@ -266,6 +266,7 @@ class ResNet:
         self.backprop(output)
         print("Dataflow graph complete.")
 
+        # TODO: More description runs and save files
         run = 'lr'+str(self.learning_rate)[2:] # name of the run, e.g. learning rate .001 = lr001
         train_writer = tf.summary.FileWriter("./summaries/"+run+"train", tf.get_default_graph())
         validation_writer = tf.summary.FileWriter("./summaries/"+run+"validation", tf.get_default_graph())
@@ -280,11 +281,13 @@ class ResNet:
             self.session.run(tf.global_variables_initializer())
         step = 0
         prev_acc = 0
+        t_size, v_size, tt_size = self.data.get_sizes()
         print("Ready for training...")
         
         for e in range(self.epochs):
             print("Epoch:", e+1)
-            for x, y in self.training:
+            for b in range(t_size // self.batch_size):
+                x, y = self.data.get_training_batch()
                 summary, _acc, _loss, _ = self.session.run([self.merged_summaries, self.accuracy, self.loss,
                                                             self.minimize_loss], feed_dict={self.images: x,
                                                                                             self.labels: y,
@@ -294,29 +297,27 @@ class ResNet:
                 if self.debug: print(_acc)
 
                 # Validate every 50 steps
-                if step % 50 == 0:
-                    for v_x, v_y in self.validation:
-                        # is_training is left on to allow us to use all available data to better find the real moments
-                        summary, v_acc, _loss = self.session.run([self.merged_summaries, self.accuracy, self.loss],
-                                                                 feed_dict={self.images: v_x, self.labels: v_y,
-                                                                            self.is_training: 1, self.dropout_rate: 1})
-                        validation_writer.add_summary(summary, step)
-                        print("Current STEP:", step)
-                        print("Validation accuracy:", v_acc)
-                        print("Validation loss:", _loss)
+                # if step % 50 == 0:
+                #     for bv in range(v_size // self.batch_size):
+                #         v_x, v_y = self.data.get_validation_batch()
+                #         # is_training is left on to allow us to use all available data to better find the real moments
+                #         summary, v_acc, _loss = self.session.run([self.merged_summaries, self.accuracy, self.loss],
+                #                                                  feed_dict={self.images: v_x, self.labels: v_y,
+                #                                                             self.is_training: 1, self.dropout_rate: 1})
+                #         validation_writer.add_summary(summary, step)
+                #         print("Current STEP:", step)
+                #         print("Validation accuracy:", v_acc)
+                #         print("Validation loss:", _loss)
 
 
-                        if v_acc > prev_acc and step:   # WHAT IS AND STEP?
-                            saver.save(self.session, "./checkpoints/fingers-{:.2f}-step".format(v_acc), global_step=step)
-                        prev_acc = v_acc
+                #         if v_acc > prev_acc:  #and step WHAT IS AND STEP?
+                #             saver.save(self.session, "./checkpoints/fingers-{:.2f}-step".format(v_acc), global_step=step)
+                #         prev_acc = v_acc
 
-                    # Refill the generator because it was exhausted
-                    self.validation = self.data.get_validation_batch(-1)
                 step += 1
-            # Refill the generator because it was exhausted
-            self.training = self.data.get_training_batch(self.batch_size)
 
         saver.save(self.session, "./checkpoints/fingers-{:.2f}-end-step".format(v_acc), global_step=step)
+        self.data.delete_temp_files()
         end = time.time()
         print("Finished.")
         print('\nTotal time elapsed: {:.2f} minutes'.format(end - self.start))
@@ -335,5 +336,5 @@ class ResNet:
 
 
 if __name__ == "__main__":
-    model = ResNet(2,50,2,debug=True)
+    model = ResNet(2,50,5,debug=True)
     model.train()
