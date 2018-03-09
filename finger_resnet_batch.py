@@ -2,11 +2,11 @@ import numpy as np
 import tensorflow as tf
 import time
 
-from data_loader import FingerDataBatch
+from data_loaders import FingerDataBatch
 
 
 class ResNet:
-    def __init__(self, blocks, batchsize, epoch_num, dropout=.5, lr=.001, augment=True, debug=False):
+    def __init__(self, blocks, batchsize, epoch_num, dropout=.5, lr=.001, augment=True, normalize=True, debug=False):
         """
         Defines the hyperparameters, creates the datasets, and Tensorflow placeholders
         """
@@ -19,6 +19,7 @@ class ResNet:
         self.epochs = epoch_num
         self.debug = debug
         self.do_augment = augment
+        self.normalize = normalize
         self.blocks = blocks
 
         # Batch normalization parameters
@@ -34,9 +35,6 @@ class ResNet:
 
         # Create data sets and a session that can be accessed throughout the class
         self.session = tf.Session()
-        # self.training = self.data.get_training_batch(self.batch_size)
-        # self.validation = self.data.get_validation_batch(-1)
-        # self.test = self.data.get_test_batch(-1)
 
         # Defines placeholders and overall network variables
         self.images = tf.placeholder(tf.float32, [None, 300, 300, 3], name='images')
@@ -63,13 +61,24 @@ class ResNet:
             inpt: Images to be augmented.
 
         Returns:
-            flip: Augmented images to be passed on.
+            bright: Augmented images to be passed on.
         """
-        bright = tf.map_fn(lambda img: tf.image.random_brightness(img, .25), inpt, name='brightness')
+        flip = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), inpt, name='flip')
+        bright = tf.map_fn(lambda img: tf.image.random_brightness(img, .25), flip, name='brightness')
         # contrast = tf.map_fn(lambda img: tf.image.random_contrast(img, 0, .5), bright, name='contrast')
-        flip = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), bright, name='flip') # CHANGED INPUT
-        return flip
+        return bright
 
+    def normalize_images(self, inpt):
+        """
+        Normalizes images PER IMAGE by subtracting mean and dividing by standard deviation
+        Args:
+            inpt: Images to be normalized
+
+        Returns:
+            Normalized images
+        """
+        return tf.map_fn(lambda img: tf.image.per_image_standardization(img), inpt, name='normalization')
+        
     def flatten(self, inpt):
         """
         Flattens a tensor into 1 dimension.  Used after the convolutional layers are done.
@@ -105,6 +114,14 @@ class ResNet:
         return tf.cond(tf.equal(self.is_training, 1), lambda: training(inpt), lambda: not_training(inpt), name='batchnorm_cond')
 
     def max_pool(self, inpt):
+        """
+        A 2x2 strided max pooling operation
+        Args:
+            inpt: Images to be max pooled
+
+        Returns:
+            Max pooled images
+        """
         return tf.nn.max_pool(inpt, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = "SAME", name='maxpool')
 
     def convolution_layer(self, inpt, filters, in_depth=1):
@@ -138,10 +155,10 @@ class ResNet:
         conv_bias = tf.get_variable("1x1_conv_biases", 1, initializer=tf.constant_initializer(0.0))
         return tf.nn.relu((tf.nn.conv2d(inpt, conv_weight, strides=[1, 1, 1, 1], padding="SAME") + conv_bias))
 
-    def convolution_block(self, inpt, name):
+    def residual_block(self, inpt, name):
         """
-        The ResNet part: creates two convolutional blocks and adds the input of the block to the output.
-        If the channels of the input is larger than 1, it is "flattened" by doing a 1x1 convolution before adding it.
+        The ResNet part: creates two convolutional layers and adds the input of the block to the output.
+        Since the channels of the input is larger than 1, it is "flattened" by doing a 1x1 convolution before adding it.
         Args:
             inpt: Images to be convolved.
 
@@ -211,29 +228,33 @@ class ResNet:
             images = self.augment(self.images)
         else:
             images = self.images # for compatibility with the above code
-
-        # with tf.variable_scope("conv_block1"):
-        #     conv_block1 = self.convolution_block(images)
-        # with tf.variable_scope("conv_block2"):
-        #     conv_block2 = self.convolution_block(conv_block1)
-        # with tf.variable_scope("fc"):
-        #     flattened = self.flatten(conv_block2)
-        #     fc = self.fully_connected(flattened, 100)
-
+        if self.normalize:
+            images = self.normalize_images(images)
+        # First convolutional layer
         with tf.variable_scope("conv"):
             first_conv = self.convolution_layer(images, 32, 3)
             throughput = self.max_pool(first_conv)
+        # Residual blocks
         for i, block in enumerate(range(self.blocks)):
             with tf.variable_scope("conv_block{}".format(i + 1)):
-                throughput = self.convolution_block(throughput, str(i))
+                throughput = self.residual_block(throughput, str(i))
+        # Fully connected layer
         with tf.variable_scope("fc"):
             flattened = self.flatten(throughput)
             fc = self.fully_connected(flattened, 100)
+        # Output layer
         with tf.variable_scope("output"):
             output = self.output_layer(fc)
         return output
 
     def loss_function(self, logits):
+        """
+        Cross entropy loss
+        Args:
+            logits: output of the network, unactivated
+        Returns:
+            Mean loss
+        """
         return tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.one_hot_labels, logits=logits))
 
     def backprop(self, output):
@@ -266,8 +287,8 @@ class ResNet:
         self.backprop(output)
         print("Dataflow graph complete.")
 
-        # TODO: More description runs and save files
-        run = 'lr'+str(self.learning_rate)[2:] # name of the run, e.g. learning rate .001 = lr001
+        # name of the run e.g. cb4b100d5lr001train = training for 4 conv blocks, 100 batch size, dropout 50%, learning rate .001
+        run = 'cb{}b{}d{}lr{}'.format(self.blocks, self.batch_size, str(self.dropout_rate)[2:], str(self.learning_rate)[2:])
         train_writer = tf.summary.FileWriter("./summaries/"+run+"train", tf.get_default_graph())
         validation_writer = tf.summary.FileWriter("./summaries/"+run+"validation", tf.get_default_graph())
         print("Data writers created.")
@@ -336,5 +357,5 @@ class ResNet:
 
 
 if __name__ == "__main__":
-    model = ResNet(2,50,5,debug=True)
+    model = ResNet(blocks=4, batchsize=64, epoch_num=10, dropout=.5, lr=.001, debug=False)
     model.train()

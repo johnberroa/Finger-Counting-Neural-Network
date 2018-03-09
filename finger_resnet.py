@@ -64,7 +64,7 @@ class ResNet:
             inpt: Images to be augmented.
 
         Returns:
-            flip: Augmented images to be passed on.
+            bright: Augmented images to be passed on.
         """
         flip = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), inpt, name='flip')
         bright = tf.map_fn(lambda img: tf.image.random_brightness(img, .25), flip, name='brightness')
@@ -159,10 +159,10 @@ class ResNet:
         conv_bias = tf.get_variable("1x1_conv_biases", 1, initializer=tf.constant_initializer(0.0))
         return tf.nn.relu((tf.nn.conv2d(inpt, conv_weight, strides=[1, 1, 1, 1], padding="SAME") + conv_bias))
 
-    def convolution_block(self, inpt, name):
+    def residual_block(self, inpt, name):
         """
-        The ResNet part: creates two convolutional blocks and adds the input of the block to the output.
-        If the channels of the input is larger than 1, it is "flattened" by doing a 1x1 convolution before adding it.
+        The ResNet part: creates two convolutional layers and adds the input of the block to the output.
+        Since the channels of the input is larger than 1, it is "flattened" by doing a 1x1 convolution before adding it.
         Args:
             inpt: Images to be convolved.
 
@@ -241,7 +241,7 @@ class ResNet:
         # Residual blocks
         for i, block in enumerate(range(self.blocks)):
             with tf.variable_scope("conv_block{}".format(i + 1)):
-                throughput = self.convolution_block(throughput, str(i))
+                throughput = self.residual_block(throughput, str(i))
         # Fully connected layer
         with tf.variable_scope("fc"):
             flattened = self.flatten(throughput)
@@ -252,6 +252,13 @@ class ResNet:
         return output
 
     def loss_function(self, logits):
+        """
+        Cross entropy loss
+        Args:
+            logits: output of the network, unactivated
+        Returns:
+            Mean loss
+        """
         return tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.one_hot_labels, logits=logits))
 
     def optimization(self, output):
