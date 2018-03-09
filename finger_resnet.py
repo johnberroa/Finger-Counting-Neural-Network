@@ -2,11 +2,11 @@ import numpy as np
 import tensorflow as tf
 import time
 
-from data_loader import FingerData
+from data_loaders import FingerData
 
 
 class ResNet:
-    def __init__(self, blocks, batchsize, epoch_num, dropout=.5, lr=.001, augment=True, debug=False):
+    def __init__(self, blocks, batchsize, epoch_num, dropout=.5, lr=.001, augment=True, normalize=True, debug=False):
         """
         Defines the hyperparameters, creates the datasets, and Tensorflow placeholders
         """
@@ -19,6 +19,7 @@ class ResNet:
         self.epochs = epoch_num
         self.debug = debug
         self.do_augment = augment
+        self.normalize = normalize
         self.blocks = blocks
 
         # Batch normalization parameters
@@ -65,10 +66,22 @@ class ResNet:
         Returns:
             flip: Augmented images to be passed on.
         """
-        bright = tf.map_fn(lambda img: tf.image.random_brightness(img, .25), inpt, name='brightness')
+        flip = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), inpt, name='flip')
+        bright = tf.map_fn(lambda img: tf.image.random_brightness(img, .25), flip, name='brightness')
         # contrast = tf.map_fn(lambda img: tf.image.random_contrast(img, 0, .5), bright, name='contrast')
-        flip = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), bright, name='flip') # CHANGED INPUT
-        return flip
+        return bright
+
+    def normalize_images(self, inpt):
+        """
+        Normalizes images PER IMAGE by subtracting mean and dividing by standard deviation
+        Args:
+            inpt: Images to be normalized
+
+        Returns:
+            Normalized images
+        """
+        return tf.map_fn(lambda img: tf.image.per_image_standardization(img), inpt, name='normalization')
+        
 
     def flatten(self, inpt):
         """
@@ -105,6 +118,14 @@ class ResNet:
         return tf.cond(tf.equal(self.is_training, 1), lambda: training(inpt), lambda: not_training(inpt), name='batchnorm_cond')
 
     def max_pool(self, inpt):
+        """
+        A 2x2 strided max pooling operation
+        Args:
+            inpt: Images to be max pooled
+
+        Returns:
+            Max pooled images
+        """
         return tf.nn.max_pool(inpt, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = "SAME", name='maxpool')
 
     def convolution_layer(self, inpt, filters, in_depth=1):
@@ -211,24 +232,21 @@ class ResNet:
             images = self.augment(self.images)
         else:
             images = self.images # for compatibility with the above code
-
-        # with tf.variable_scope("conv_block1"):
-        #     conv_block1 = self.convolution_block(images)
-        # with tf.variable_scope("conv_block2"):
-        #     conv_block2 = self.convolution_block(conv_block1)
-        # with tf.variable_scope("fc"):
-        #     flattened = self.flatten(conv_block2)
-        #     fc = self.fully_connected(flattened, 100)
-
+        if self.normalize:
+            images = self.normalize_images(images)
+        # First convolutional layer
         with tf.variable_scope("conv"):
             first_conv = self.convolution_layer(images, 32, 3)
             throughput = self.max_pool(first_conv)
+        # Residual blocks
         for i, block in enumerate(range(self.blocks)):
             with tf.variable_scope("conv_block{}".format(i + 1)):
                 throughput = self.convolution_block(throughput, str(i))
+        # Fully connected layer
         with tf.variable_scope("fc"):
             flattened = self.flatten(throughput)
             fc = self.fully_connected(flattened, 100)
+        # Output layer
         with tf.variable_scope("output"):
             output = self.output_layer(fc)
         return output
@@ -236,7 +254,7 @@ class ResNet:
     def loss_function(self, logits):
         return tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.one_hot_labels, logits=logits))
 
-    def backprop(self, output):
+    def optimization(self, output):
         """
         The backpropagation step with Adam optimizer.  Also computes metrics and creates summary statistics.
         """
@@ -263,10 +281,11 @@ class ResNet:
         """
         print("Generating dataflow graph...")
         output = self.inference()
-        self.backprop(output)
+        self.optimization(output)
         print("Dataflow graph complete.")
 
-        run = 'lr'+str(self.learning_rate)[2:] # name of the run, e.g. learning rate .001 = lr001
+        # name of the run e.g. cb4b100d5lr001train = training for 4 conv blocks, 100 batch size, dropout 50%, learning rate .001
+        run = 'cb{}b{}d{}lr{}'.format(self.blocks, self.batch_size, str(self.dropout_rate)[2:], str(self.learning_rate)[2:])
         train_writer = tf.summary.FileWriter("./summaries/"+run+"train", tf.get_default_graph())
         validation_writer = tf.summary.FileWriter("./summaries/"+run+"validation", tf.get_default_graph())
         print("Data writers created.")
@@ -306,7 +325,7 @@ class ResNet:
                         print("Validation loss:", _loss)
 
 
-                        if v_acc > prev_acc and step:   # WHAT IS AND STEP?
+                        if v_acc > prev_acc:
                             saver.save(self.session, "./checkpoints/fingers-{:.2f}-step".format(v_acc), global_step=step)
                         prev_acc = v_acc
 
@@ -335,5 +354,5 @@ class ResNet:
 
 
 if __name__ == "__main__":
-    model = ResNet(2,50,2,debug=True)
+    model = ResNet(blocks=4, batchsize=64, epoch_num=10, dropout=.5, lr=.001, debug=False)
     model.train()
